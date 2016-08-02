@@ -3558,6 +3558,7 @@ const SSL_CIPHER *ssl3_choose_cipher(SSL *s, STACK_OF(SSL_CIPHER) *clnt,
     STACK_OF(SSL_CIPHER) *prio, *allow;
     int i, ii, ok;
     unsigned long alg_k, alg_a, mask_k, mask_a;
+    int use_chacha = 0;
 
     /* Let's see which ciphers we can support */
 
@@ -3590,9 +3591,16 @@ const SSL_CIPHER *ssl3_choose_cipher(SSL *s, STACK_OF(SSL_CIPHER) *clnt,
     if (s->options & SSL_OP_CIPHER_SERVER_PREFERENCE || tls1_suiteb(s)) {
         prio = srvr;
         allow = clnt;
+        /* Use ChaPoly iff it's client's most preferred cipher suite */
+        if (sk_SSL_CIPHER_num(clnt) > 0) {
+            c = sk_SSL_CIPHER_value(clnt, 0);
+            if (c->algorithm_enc == SSL_CHACHA20POLY1305)
+                use_chacha = 1;
+        }
     } else {
         prio = clnt;
         allow = srvr;
+        use_chacha = 1;
     }
 
     tls1_set_cert_validity(s);
@@ -3608,6 +3616,10 @@ const SSL_CIPHER *ssl3_choose_cipher(SSL *s, STACK_OF(SSL_CIPHER) *clnt,
         if (SSL_IS_DTLS(s) &&
                 (DTLS_VERSION_LT(s->version, c->min_dtls) ||
                 DTLS_VERSION_GT(s->version, c->max_dtls)))
+            continue;
+
+        /* Skip ChaPoly unless top client priority */
+        if (c->algorithm_enc == SSL_CHACHA20POLY1305 && !use_chacha)
             continue;
 
         mask_k = s->s3->tmp.mask_k;
